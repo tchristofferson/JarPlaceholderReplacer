@@ -1,8 +1,6 @@
 package com.tchristofferson.jarplaceholderreplacer;
 
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 
 public class PlaceholderLocationInfo {
 
@@ -12,6 +10,12 @@ public class PlaceholderLocationInfo {
     public PlaceholderLocationInfo(String className) {
         this.className = className;
         this.containedPlaceholders = new HashSet<>();
+    }
+
+    PlaceholderLocationInfo(String className, String... containedPlaceholders) {
+        this.className = className;
+        this.containedPlaceholders = new HashSet<>();
+        this.containedPlaceholders.addAll(Arrays.asList(containedPlaceholders));
     }
 
     public String getClassName() {
@@ -24,5 +28,13 @@ public class PlaceholderLocationInfo {
 
     public void addPlaceholder(String placeholder) {
         containedPlaceholders.add(placeholder);
+    }
+
+    @Override
+    public String toString() {
+        return "PlaceholderLocationInfo{" +
+            "className='" + className + '\'' +
+            ", containedPlaceholders=" + containedPlaceholders +
+            '}';
     }
 }

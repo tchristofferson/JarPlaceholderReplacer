@@ -5,54 +5,78 @@ import org.objectweb.asm.*;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Enumeration;
+import java.util.*;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
+import java.util.stream.Collectors;
 
-public class JPR {
+public class PlaceholderReplacer {
 
-    public static ByteArrayOutputStream modifyJar(String inputJarPath, String loggedInUsername) throws IOException {
-        JarFile jarFile = new JarFile(inputJarPath);
+    public static byte[] replace(JarFile jarFile, Placeholder... placeholders) throws IOException {
+        if (placeholders.length == 0)
+            throw new IllegalArgumentException("placeholders size cannot be 0!");
+
+        return replace(jarFile, Arrays.asList(placeholders));
+    }
+
+    public static byte[] replace(JarFile jarFile, Collection<Placeholder> placeholders) throws IOException {
+        Map<String, List<Placeholder>> placeholderMap = placeholders.stream()
+            .collect(Collectors.groupingBy(Placeholder::getClassPath));
+
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         JarOutputStream jarOutputStream = new JarOutputStream(outputStream);
-
         Enumeration<JarEntry> entries = jarFile.entries();
 
         while (entries.hasMoreElements()) {
             JarEntry entry = entries.nextElement();
+            String classPath = entry.getName();
 
             // Skip entries that are not class files
-            if (!entry.getName().endsWith(".class")) {
-                copyEntry(jarFile, jarOutputStream, entry);
+            if (!placeholderMap.containsKey(classPath)) {
+                copyEntry(jarFile, jarOutputStream, entry);//copy file to new jar as is
                 continue;
             }
 
+            List<Placeholder> classPlaceholders = placeholderMap.get(classPath);
+
             try (InputStream entryInputStream = jarFile.getInputStream(entry)) {
-                byte[] modifiedClassBytes = modifyClass(entryInputStream, loggedInUsername);
+                byte[] modifiedClassBytes = modifyClass(entryInputStream, classPlaceholders);
                 saveModifiedClass(jarOutputStream, entry, modifiedClassBytes);
             }
         }
 
-        return outputStream;
+        jarOutputStream.flush();
+        byte[] bytes = outputStream.toByteArray();
+        jarOutputStream.close();
+
+        return bytes;
     }
 
-    private static byte[] modifyClass(InputStream classInputStream, String loggedInUsername) throws IOException {
+    private static byte[] modifyClass(InputStream classInputStream, Collection<Placeholder> placeholders) throws IOException {
         ClassReader classReader = new ClassReader(classInputStream);
         ClassWriter classWriter = new ClassWriter(classReader, ClassWriter.COMPUTE_FRAMES);
 
-        classReader.accept(new ClassVisitor(Opcodes.ASM7, classWriter) {
+        classReader.accept(new ClassVisitor(Opcodes.ASM9, classWriter) {
             @Override
             public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
                 MethodVisitor methodVisitor = cv.visitMethod(access, name, desc, signature, exceptions);
-                return new MethodVisitor(Opcodes.ASM7, methodVisitor) {
+                return new MethodVisitor(Opcodes.ASM9, methodVisitor) {
                     @Override
                     public void visitLdcInsn(Object cst) {
                         if (cst instanceof String) {
-                            String modifiedString = ((String) cst).replace("%__USER__%", loggedInUsername);
-                            super.visitLdcInsn(modifiedString);
-                            return;
+                            String value = (String) cst;
+
+                            for (Placeholder placeholder : placeholders) {
+                                if (value.contains(placeholder.getToReplace())) {
+                                    value = value.replace(placeholder.getToReplace(), placeholder.getReplacement());
+                                    break;//Only replaces one placeholder for each string, so break
+                                }
+                            }
+
+                            cst = value;
                         }
+
                         super.visitLdcInsn(cst);
                     }
                 };
