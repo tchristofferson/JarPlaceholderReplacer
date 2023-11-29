@@ -3,6 +3,7 @@ package com.tchristofferson.jarplaceholderreplacer;
 import org.objectweb.asm.*;
 
 import java.io.ByteArrayOutputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.*;
@@ -24,33 +25,30 @@ public class PlaceholderReplacer {
         Map<String, List<Placeholder>> placeholderMap = placeholders.stream()
             .collect(Collectors.groupingBy(Placeholder::getClassPath));
 
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        JarOutputStream jarOutputStream = new JarOutputStream(outputStream);
         Enumeration<JarEntry> entries = jarFile.entries();
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 
-        while (entries.hasMoreElements()) {
-            JarEntry entry = entries.nextElement();
-            String classPath = entry.getName();
+        try (JarOutputStream jarOutputStream = new JarOutputStream(outputStream)) {
+            while (entries.hasMoreElements()) {
+                JarEntry entry = entries.nextElement();
+                String classPath = entry.getName();
 
-            // Skip entries that are not class files
-            if (!placeholderMap.containsKey(classPath)) {
-                copyEntry(jarFile, jarOutputStream, entry);//copy file to new jar as is
-                continue;
-            }
+                // Skip entries that are not class files
+                if (!classPath.endsWith(".class") || !placeholderMap.containsKey(classPath)) {
+                    copyEntry(jarFile, jarOutputStream, entry);//copy file to new jar as is
+                    continue;
+                }
 
-            List<Placeholder> classPlaceholders = placeholderMap.get(classPath);
+                List<Placeholder> classPlaceholders = placeholderMap.get(classPath);
 
-            try (InputStream entryInputStream = jarFile.getInputStream(entry)) {
-                byte[] modifiedClassBytes = modifyClass(entryInputStream, classPlaceholders);
-                saveModifiedClass(jarOutputStream, entry, modifiedClassBytes);
+                try (InputStream entryInputStream = jarFile.getInputStream(entry)) {
+                    byte[] modifiedClassBytes = modifyClass(entryInputStream, classPlaceholders);
+                    saveModifiedClass(jarOutputStream, entry, modifiedClassBytes);
+                }
             }
         }
 
-        jarOutputStream.flush();
-        byte[] bytes = outputStream.toByteArray();
-        jarOutputStream.close();
-
-        return bytes;
+        return outputStream.toByteArray();
     }
 
     private static byte[] modifyClass(InputStream classInputStream, Collection<Placeholder> placeholders) throws IOException {
@@ -69,12 +67,10 @@ public class PlaceholderReplacer {
 
                             for (Placeholder placeholder : placeholders) {
                                 if (value.contains(placeholder.getToReplace())) {
-                                    value = value.replace(placeholder.getToReplace(), placeholder.getReplacement());
+                                    cst = value.replace(placeholder.getToReplace(), placeholder.getReplacement());
                                     break;//Only replaces one placeholder for each string, so break
                                 }
                             }
-
-                            cst = value;
                         }
 
                         super.visitLdcInsn(cst);
